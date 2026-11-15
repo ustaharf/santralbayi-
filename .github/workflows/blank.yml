@@ -3,6 +3,10 @@ name: Android APK Olustur
 permissions:
   contents: write
 
+concurrency:
+  group: santralbayi-apk-build
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:
@@ -36,12 +40,21 @@ jobs:
             cp -rf _unzipped/. .
             rm -rf _unzipped
           fi
-          find public/assets/aistudio -type f ! -name "*.mp3" -delete 2>/dev/null || true
+          find public/assets/aistudio -type f ! -name "*.mp3" ! -name "*.wav" ! -name "*.json" -delete 2>/dev/null || true
+          mkdir -p src
+          for f in *.tsx *.ts *.css; do
+            if [ -f "$f" ] && [ "$f" != "vite.config.ts" ] && [ "$f" != "capacitor.config.ts" ] && [ "$f" != "server.ts" ]; then
+              cp -f "$f" src/
+            fi
+          done
           npm install
           npm run build
 
       - name: Android Hazirla
         run: |
+          if ! command -v convert >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick
+          fi
           npx cap add android || true
           npx cap sync android
           mkdir -p android/app/src/main/java/com/santralbayi/app
@@ -64,12 +77,36 @@ jobs:
               .filter(perm => !xml.includes(perm))
               .map(perm => '    <uses-permission android:name=\"' + perm + '\" />')
               .join('\n');
+            if (!xml.includes('usesCleartextTraffic')) {
+              xml = xml.replace('<application', '<application android:usesCleartextTraffic=\"true\"');
+            }
             if (missing) {
               xml = xml.replace('<application', missing + '\n\n    <application');
-              fs.writeFileSync(p, xml);
             }
+            fs.writeFileSync(p, xml);
           "
           printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="colorPrimary">#0f172a</color>\n    <color name="colorPrimaryDark">#0f172a</color>\n    <color name="colorAccent">#0ea5e9</color>\n</resources>\n' > android/app/src/main/res/values/colors.xml
+          printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">#0f172a</color>\n</resources>\n' > android/app/src/main/res/values/ic_launcher_background.xml
+          rm -f android/app/src/main/res/drawable/ic_launcher_background.xml android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml
+          if [ -f "public/pwa-512x512.png" ] && [ -f "public/pwa-maskable-512x512.png" ]; then
+            for pair in "mdpi:48:108" "hdpi:72:162" "xhdpi:96:216" "xxhdpi:144:324" "xxxhdpi:192:432"; do
+              dens="${pair%%:*}"
+              rest="${pair#*:}"
+              legacy_sz="${rest%%:*}"
+              fg_sz="${rest#*:}"
+              inner_sz=$(( fg_sz * 68 / 100 ))
+              dir="android/app/src/main/res/mipmap-${dens}"
+              mkdir -p "$dir"
+              convert public/pwa-512x512.png -resize "${legacy_sz}x${legacy_sz}" "$dir/ic_launcher.png"
+              convert public/pwa-maskable-512x512.png -resize "${legacy_sz}x${legacy_sz}" "$dir/ic_launcher_round.png"
+              convert -size "${fg_sz}x${fg_sz}" xc:"#0f172a" \( public/pwa-maskable-512x512.png -resize "${inner_sz}x${inner_sz}" \) -gravity center -composite "$dir/ic_launcher_foreground.png"
+            done
+            for sp in android/app/src/main/res/drawable*/splash.png; do
+              if [ -f "$sp" ]; then
+                convert -size 1080x1920 xc:"#0f172a" \( public/pwa-maskable-512x512.png -resize 520x520 \) -gravity center -composite "$sp"
+              fi
+            done
+          fi
           printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">\n        <item name="colorPrimary">@color/colorPrimary</item>\n        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>\n        <item name="colorAccent">@color/colorAccent</item>\n        <item name="android:statusBarColor">#0f172a</item>\n        <item name="android:navigationBarColor">#0f172a</item>\n        <item name="android:windowBackground">#0f172a</item>\n    </style>\n    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.NoActionBar">\n        <item name="windowActionBar">false</item>\n        <item name="windowNoTitle">true</item>\n        <item name="android:background">@null</item>\n        <item name="android:statusBarColor">#0f172a</item>\n        <item name="android:navigationBarColor">#0f172a</item>\n        <item name="android:windowBackground">#0f172a</item>\n    </style>\n    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">\n        <item name="android:background">@drawable/splash</item>\n    </style>\n</resources>\n' > android/app/src/main/res/values/styles.xml
 
       - name: APK Derle
@@ -78,27 +115,27 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: APK Kaydet
+      - name: APK Kaydet (v1.4)
         run: |
           mkdir -p output-apk
-          cp android/app/build/outputs/apk/debug/app-debug.apk output-apk/santralbayi-v1.3.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk output-apk/santralbayi-v1.4.apk
 
       - name: ZIPsiz Direkt APK Yayinla
         uses: softprops/action-gh-release@v2
         continue-on-error: true
         with:
-          tag_name: "v1.3.${{ github.run_number }}"
-          name: "SantralBayi v1.3 (#${{ github.run_number }})"
-          files: output-apk/santralbayi-v1.3.apk
+          tag_name: "v1.4.${{ github.run_number }}"
+          name: "SantralBayi v1.4 (#${{ github.run_number }})"
+          files: output-apk/santralbayi-v1.4.apk
           make_latest: true
 
       - name: APK Indirilebilir Yap
         uses: actions/upload-artifact@v4
         with:
-          name: santralbayi-v1.3-apk
-          path: output-apk/santralbayi-v1.3.apk
+          name: santralbayi-v1.4-apk
+          path: output-apk/santralbayi-v1.4.apk
 
       - name: Indirme Linkini Yazdir
         run: |
-          echo "## 📲 SantralBayi v1.3 APK Hazır" >> $GITHUB_STEP_SUMMARY
-          echo "👉 **[📥 santralbayi-v1.3.apk Doğrudan İndir (ZIP'siz Tek Tıkla)](https://github.com/${{ github.repository }}/releases/latest/download/santralbayi-v1.3.apk)**" >> $GITHUB_STEP_SUMMARY
+          echo "## 📲 SantralBayi v1.4 APK Hazır" >> $GITHUB_STEP_SUMMARY
+          echo "👉 **[📥 santralbayi-v1.4.apk Doğrudan İndir (ZIP'siz Tek Tıkla)](https://github.com/${{ github.repository }}/releases/latest/download/santralbayi-v1.4.apk)**" >> $GITHUB_STEP_SUMMARY
