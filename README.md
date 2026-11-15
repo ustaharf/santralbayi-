@@ -1,123 +1,20 @@
-name: Android APK Olustur
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
+</div>
 
-permissions:
-  contents: write
+# Run and deploy your AI Studio app
 
-on:
-  workflow_dispatch:
-  push:
-    branches: [ main, master ]
+This contains everything you need to run your app locally.
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Kodlari Cek
-        uses: actions/checkout@v4
+View your app in AI Studio: https://ai.studio/apps/2553e308-c42a-4bff-8b53-2c582ebd9d78
 
-      - name: Node Kur
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
+## Run Locally
 
-      - name: Java Kur
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'zulu'
-          java-version: '21'
+**Prerequisites:**  Node.js
 
-      - name: ZIP Dosyasini Ac ve Web Derle
-        run: |
-          latest_zip=$(ls -t *.zip 2>/dev/null | head -n 1 || true)
-          if [ -n "$latest_zip" ] && [ -f "$latest_zip" ]; then
-            mkdir -p _unzipped
-            unzip -oq "$latest_zip" -d _unzipped
-            if [ -f "_unzipped/package.json" ]; then
-              rm -rf _unzipped/.github
-              cp -rf _unzipped/. .
-            else
-              sub=$(find _unzipped -maxdepth 2 -name "package.json" -exec dirname {} \; | head -n 1)
-              if [ -n "$sub" ]; then
-                rm -rf "$sub/.github"
-                cp -rf "$sub"/. .
-              fi
-            fi
-            rm -rf _unzipped
-          fi
-          find public/assets/aistudio -type f ! -name "*.mp3" -delete 2>/dev/null || true
-          mkdir -p src
-          for f in *.tsx *.ts *.css; do
-            if [ -f "$f" ] && [ "$f" != "vite.config.ts" ] && [ "$f" != "capacitor.config.ts" ] && [ "$f" != "server.ts" ]; then
-              cp -f "$f" src/
-            fi
-          done
-          npm install
-          npm run build
 
-      - name: Android Hazirla
-        run: |
-          npx cap add android || true
-          npx cap sync android
-          mkdir -p android/app/src/main/java/com/santralbayi/app
-          if [ -d "android-bridge" ]; then
-            cp -f android-bridge/*.java android/app/src/main/java/com/santralbayi/app/
-          fi
-          for jf in AndroidBridge.java MainActivity.java; do
-            if [ -f "$jf" ]; then
-              cp -f "$jf" android/app/src/main/java/com/santralbayi/app/
-            fi
-          done
-          node -e "
-            const fs = require('fs');
-            const p = 'android/app/src/main/AndroidManifest.xml';
-            let xml = fs.readFileSync(p, 'utf8');
-            const perms = [
-              'android.permission.CALL_PHONE',
-              'android.permission.READ_PHONE_STATE',
-              'android.permission.READ_CALL_LOG',
-              'android.permission.READ_CONTACTS',
-              'android.permission.POST_NOTIFICATIONS',
-              'android.permission.FOREGROUND_SERVICE'
-            ];
-            const missing = perms
-              .filter(perm => !xml.includes(perm))
-              .map(perm => '    <uses-permission android:name=\"' + perm + '\" />')
-              .join('\n');
-            if (missing) {
-              xml = xml.replace('<application', missing + '\n\n    <application');
-              fs.writeFileSync(p, xml);
-            }
-          "
-          printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="colorPrimary">#0f172a</color>\n    <color name="colorPrimaryDark">#0f172a</color>\n    <color name="colorAccent">#0ea5e9</color>\n</resources>\n' > android/app/src/main/res/values/colors.xml
-          printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">\n        <item name="colorPrimary">@color/colorPrimary</item>\n        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>\n        <item name="colorAccent">@color/colorAccent</item>\n        <item name="android:statusBarColor">#0f172a</item>\n        <item name="android:navigationBarColor">#0f172a</item>\n        <item name="android:windowBackground">#0f172a</item>\n    </style>\n    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.NoActionBar">\n        <item name="windowActionBar">false</item>\n        <item name="windowNoTitle">true</item>\n        <item name="android:background">@null</item>\n        <item name="android:statusBarColor">#0f172a</item>\n        <item name="android:navigationBarColor">#0f172a</item>\n        <item name="android:windowBackground">#0f172a</item>\n    </style>\n    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">\n        <item name="android:background">@drawable/splash</item>\n    </style>\n</resources>\n' > android/app/src/main/res/values/styles.xml
-
-      - name: APK Derle
-        working-directory: android
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
-
-      - name: APK Kaydet
-        run: |
-          mkdir -p output-apk
-          cp android/app/build/outputs/apk/debug/app-debug.apk output-apk/santralbayi-v1.3.apk
-
-      - name: ZIPsiz Direkt APK Yayinla
-        uses: softprops/action-gh-release@v2
-        continue-on-error: true
-        with:
-          tag_name: "v1.3.${{ github.run_number }}"
-          name: "SantralBayi v1.3 (#${{ github.run_number }})"
-          files: output-apk/santralbayi-v1.3.apk
-          make_latest: true
-
-      - name: APK Indirilebilir Yap
-        uses: actions/upload-artifact@v4
-        with:
-          name: santralbayi-v1.3-apk
-          path: output-apk/santralbayi-v1.3.apk
-
-      - name: Indirme Linkini Yazdir
-        run: |
-          echo "## 📲 SantralBayi v1.3 APK Hazır" >> $GITHUB_STEP_SUMMARY
-          echo "👉 **[📥 santralbayi-v1.3.apk Doğrudan İndir (ZIP'siz Tek Tıkla)](https://github.com/${{ github.repository }}/releases/latest/download/santralbayi-v1.3.apk)**" >> $GITHUB_STEP_SUMMARY
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`
